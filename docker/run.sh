@@ -5,12 +5,12 @@ source /etc/utils.sh
 checkssl(){
   local file="/cert/$SSL_PUBLIC"
   if [ ! -f "$file" ]; then
-    echoerr "找不到证书公钥文件： $file, 请检查配置"
+    echoerr "Certificate public key file not found: $file; please check configuration"
     exit 1
   fi
   file="/cert/$SSL_KEY"
   if [ ! -f "$file" ]; then
-    echoerr "找不到证书私钥文件： $file, 请检查配置"
+    echoerr "Certificate private key file not found: $file, please check configuration"
     exit 1
   fi
 }
@@ -25,7 +25,7 @@ checkindex(){
    file_list=("index.php" "index.html" "index.htm" "index.nginx-debian.html")
    for file in "${file_list[@]}"; do
     if [ -f "$file" ]; then
-      echolog "存在默认首页: $file"
+      echolog "Default homepage exists: $file"
       isindex=1
       break
     fi
@@ -33,7 +33,7 @@ checkindex(){
   local xfile="50x.html"
   is50x=0
    if [ -f "$xfile" ]; then
-      echolog "存在默认50x错误页: $xfile"
+      echolog "Default 50x error page exists: $file"
       is50x=1
     fi
 }
@@ -41,11 +41,11 @@ checkindex(){
 initIndex(){
     checkindex
     if [ $isindex -eq 0 ]; then
-      echolog "不存在首页, 则使用默认首页"
+      echolog "Homepage does not exist, using default homepage"
       \cp /index.html /web/index.html
     fi
     if [ $is50x -eq 0 ]; then
-      echolog "不存在50x错误页, 则使用默认50x错误页"
+      echolog "50x error page does not exist, using default 50x error page"
       \cp /50x.html /web/50x.html
     fi
 }
@@ -123,7 +123,38 @@ EOF
 
 }
 
-echolog "开始启动-----------------------------"
-echolog "使用的tunnel_path=$TUNNEL_PATH-------"
+initWireguard () {
+  if [ -f "/etc/wireguard/default.conf" ]; then
+    cat > /etc/init.d/wg-quick << EOF
+#!/sbin/openrc-run
+
+description="WireGuard VPN"
+
+depend() {
+    need net
+    use logger dns
+}
+
+start() {
+    ebegin "Starting WireGuard"
+    wg-quick up default
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping WireGuard"
+    wg-quick down default
+    eend $?
+}
+EOF
+    chmod +x /etc/init.d/wg-quick
+    rc-update add wg-quick default
+    rc-service wg-quick start
+  fi
+}
+
+echolog "Starting-----------------------------"
+echolog "Using tunnel_path=$TUNNEL_PATH-------"
 checkssl && initIndex && initConfig && nginx && \
 cd /default && chmod +x ./overtls && ./overtls -v $OVERTLS_LOG_LEVEL -r server -c config.json
+initWireguard

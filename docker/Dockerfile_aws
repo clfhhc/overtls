@@ -1,4 +1,24 @@
-FROM alpine:3.17
+ARG ALPINE_VERSION=3.19
+FROM python:3.11-alpine${ALPINE_VERSION} as builder
+
+ARG AWS_CLI_VERSION=2.21.3
+RUN apk add --no-cache git unzip groff build-base libffi-dev cmake
+RUN git clone --single-branch --depth 1 -b ${AWS_CLI_VERSION} https://github.com/aws/aws-cli.git
+
+WORKDIR /aws-cli
+RUN ./configure --with-install-type=portable-exe --with-download-deps
+RUN make
+RUN make install
+
+# reduce image size: remove examples
+RUN rm -rf /usr/local/lib/aws-cli/awscli/examples
+RUN find /usr/local/lib/aws-cli/awscli/botocore/data -name examples-1.json -delete
+RUN (cd /usr/local/lib/aws-cli; for a in *.so*; do test -f /lib/$a && rm $a; done)
+
+# build the final image
+FROM alpine:${ALPINE_VERSION}
+COPY --from=builder /usr/local/lib/aws-cli/ /usr/local/lib/aws-cli/
+RUN ln -s /usr/local/lib/aws-cli/aws /usr/local/bin/aws
 
 ENV TUNNEL_PATH=/secret-tunnel-path/
 ENV OVERTLS_LOG_LEVEL=debug
@@ -23,10 +43,14 @@ RUN echo 'export HTTP_PORT='"$HTTP_PORT" > /etc/envinit.sh && \
     sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
     echo "https://nginx.org/packages/mainline/alpine/v3.17/main" >> /etc/apk/repositories && \
     \cp /utils.sh /etc/utils.sh && \
-    apk add --update --allow-untrusted --no-cache bash unzip wget fontconfig nginx nginx-mod-stream nginx-mod-http-headers-more nginx-mod-http-lua vim && \
+    apk add --update --allow-untrusted --no-cache bash unzip wget fontconfig nginx nginx-mod-stream nginx-mod-http-headers-more nginx-mod-http-lua vim \
+    # add additional common libs
+    cmake gcc g++ libc-dev libffi-dev openssl-dev groff curl wireguard-tools openrc && \
     chmod +x /run.sh && mkdir -p /default/ && cd /default && \
+    # download overtls
     wget -O overtls.zip https://github.com/shadowsocksr-live/overtls/releases/latest/download/overtls-x86_64-unknown-linux-musl.zip && \
     unzip overtls.zip && rm -rf overtls.zip && \
+    # clean up
     fc-cache -f -v && \
     rm -rf /var/cache/apk/* /tmp/* && \
     mkdir /web && \
